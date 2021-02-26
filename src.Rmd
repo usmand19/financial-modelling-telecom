@@ -1,0 +1,247 @@
+---
+title: "Analysis of Verizon Wireless and AT&T Stock Prices"
+author: "Usman Dauda"
+date: "13/02/2021"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+library(quantmod)
+library(ggplot2)
+library(xts)
+library(e1071)
+library(kableExtra)
+library(reshape2)
+
+
+# Define strings used for specifying legend of Verizon and AT&T plots
+
+legend = "Companies"
+breaks = c("Verizon", "AT&T")
+values = c("Verizon" = "red", "AT&T" = "dodgerblue" )
+```
+
+## Obtaining Stock Data
+
+Here we create plots of Verizon Wireless and AT&T using the 'quantmod' library in R, which allows us to import stock prices by their ticker over a specified time period. In this case, the stock prices from Feb 1^st^ 2013 till 2021 are used.
+
+```{r message=FALSE, warning=FALSE}
+# Obtain 8 years of stock data for Verizon Wireless
+verizon_data = getSymbols("VZ", src = "yahoo", from = "2013-02-01", to = "2021-02-01", auto.assign = FALSE)
+at_t_data = getSymbols("T", src = "yahoo", from = "2013-02-01", to = "2021-02-01", auto.assign = FALSE)
+```
+
+
+```{r }
+# Plot Verizon Stock price over 8 year period
+ggplot()+
+  geom_line(mapping = aes(x = index(verizon_data$VZ.Close), y = as.double(verizon_data$VZ.Close), color = "Verizon")) +
+  geom_line(mapping = aes(x = index(at_t_data$T.Close), y = as.double(at_t_data$T.Close), color = "AT&T")) +
+  labs(x = "Time", y = "Market Close Price", title = "Market Close Prices for Verizon Wireless and AT&T") +
+  scale_color_manual(name = legend, breaks = breaks,values = values)
+```
+
+The plot above shows similar trends for both stocks, as they are in the same industry after all. The similarity in the stock trends is lacking in mid-2018 through to late 2019, which might be explained by setbacks from the legal battle fought by AT&T-Time Warner during their [merger in June of 2018](https://variety.com/2018/biz/news/att-time-warner-stocks-doj-antitrust-ruling-1202843216/).
+
+
+### Calculate and Plot Log Returns of Stocks
+
+Since the stock data can be interpreted as a time series, the log returns, defined as $log(\frac{S_{t}}{S_{t+1}})$ is obtained for the stock prices, in order to compare daily returns of the closing prices of the stocks over time.\
+
+```{r}
+# Calculate Log Returns for both Stocks
+log_return = log(verizon_data$VZ.Close/lag.xts(verizon_data$VZ.Close))
+verizon = list(log_return = as.double(log_return)[-1])
+log_return = log(at_t_data$T.Close/lag.xts(at_t_data$T.Close))
+at_t = list(log_return = as.double(log_return)[-1])
+```
+
+
+```{r,fig.align='center',out.extra='angle=90', echo=FALSE}
+# Plot Log returns of Verizon Stock Price
+ggplot( )+
+  geom_line(mapping = aes(x = index(verizon_data$VZ.Close)[-1], y = verizon$log_return), color= "red") +
+  labs(x = "Time", y = "Log Returns", title = "Verizon Wireless Log Returns", subtitle="2013-02-01 to 2021-02-01")
+
+# Plot Log Returns of AT&T Stock Price
+ggplot() +
+  geom_line(mapping = aes(x = index(at_t_data$T.Close)[-1], y = at_t$log_return), color= "dodgerblue") +
+  labs(x = "Time", y = "Log Returns", title = "AT&T Log Returns", subtitle="2013-02-01 to 2021-02-01")
+```
+
+
+The log returns for both companies are centered on 0, and appear to be randomly distributed in value, a good indicator that a normal distribution can be used to model the log returns of the stock price.\
+
+### ACF of Log Returns and Squares of Log Returns
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+verizon[["acf"]] = with(verizon, acf(log_return, na.action = na.pass))
+at_t[["acf"]] = with(at_t, acf(log_return, na.action = na.pass))
+verizon[["acfsquared"]] = with(verizon, acf(log_return^2, na.action = na.pass))
+at_t[["acfsquared"]] = with(at_t, acf(log_return^2, na.action = na.pass))
+```
+
+
+```{r}
+# Plot ACF of log returns
+ggplot()+
+  geom_point(mapping = aes(x = verizon$acf$lag, y = verizon$acf$acf, color = "Verizon")) + 
+  geom_path(mapping = aes(x = verizon$acf$lag, y = verizon$acf$acf, color = "Verizon")) +
+  geom_point(mapping = aes(x = at_t$acf$lag, y = at_t$acf$acf, color = "AT&T")) +
+  geom_path(mapping = aes(x = at_t$acf$lag, y = at_t$acf$acf, color = "AT&T")) +
+  labs(x = "Lag", y = "ACF", title = "ACF of Log Returns") +
+  scale_color_manual(name = legend, breaks = breaks,values = values)
+
+# Plot ACF of squares of log returns
+ggplot()+
+  geom_point(mapping = aes(x = verizon$acfsquared$lag, y = verizon$acfsquared$acf, color = "Verizon")) + 
+  geom_path(mapping = aes(x = verizon$acfsquared$lag, y = verizon$acfsquared$acf, color = "Verizon")) +
+  geom_point(mapping = aes(x = at_t$acfsquared$lag, y = at_t$acfsquared$acf, color = "AT&T")) +
+  geom_path(mapping = aes(x = at_t$acfsquared$lag, y = at_t$acfsquared$acf, color = "AT&T")) +
+  labs(x = "Lag", y = "ACF", title = expression('ACF of (Log Returns)' ^2 )) +
+  scale_color_manual(name = legend, breaks = breaks,values = values)
+```
+
+Both log returns and squares of log returns decay to 0 in the auto-correlation plots, which indicates that there is no dependence in the log returns over time. This result is important because visually, it validates the assumption that the log returns are not only normal, but  independent and identically distributed (iid) random variables with distribution $Z_i \sim N( \frac{\mu}{N} - \frac{\sigma^2}{2N},\frac{\sigma^2}{N})$where:\
+ * $\mu$ = Mean of the stock\
+ * N = Number of trading days in a year (assumed to be 252)\
+ * $\sigma^2$ = The volatility of the stock\
+
+### Computing Mean, Standard Deviation, Skewness, Kurtosis, and Density
+
+```{r}
+# Computing means
+verizon[["mean"]] = with(verizon, mean(log_return))
+at_t[["mean"]] = with(at_t, mean(log_return))
+
+#Computing standard deviations
+verizon[["sd"]] = with(verizon, sd(log_return))
+at_t[["sd"]] = with(at_t, sd(log_return))
+
+# Computing skewness
+verizon[["skewness"]] = with(verizon, skewness(log_return))
+at_t[["skewness"]] = with(at_t, skewness(log_return))
+
+# Computing kurtosis
+verizon[["kurtosis"]] = with(verizon, kurtosis(log_return))
+at_t[["kurtosis"]] = with(at_t, kurtosis(log_return))
+
+# Computing Densities
+verizon[["density"]] = with(verizon,density(log_return, n=1024))
+at_t[["density"]] = with(at_t,density(log_return, n=1024))
+
+
+summary1 = data.frame(statistics = c("Mean","Standard Deviation","Skewness","Kurtosis"), Verizon = with(verizon, c(mean,sd,skewness,kurtosis)), "AT_T" =with(at_t, c(mean,sd,skewness,kurtosis)) )
+
+kbl(summary1, caption = "Summary Statistics") %>%  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+**Mean & Standard Deviation:** For both stocks,the means were close to zero, and had a standard deviation of $\approx$ 0.01. The low standard deviation values implies that the log returns (and therefore the stocks themselves) are not very volatile, and the mean being close to zero indicates that the log returns are approximately evenly distributed.\
+
+**Kurtosis & Skewness:** The kurtosis for both stocks are greater than 3, which indicates that the distributions of log returns have heavy tails, with AT&T log returns having even heavier tails. An implication of this result is that the normal distribution might not be a good approximate of log returns. Regarding skewness, both distributions have a value near zero, which indicates that the distribution of log returns is roughly symmetrical. In this case, the skewness results favor a normal distribution, since it is symmetric with a skewness of 0.\
+
+### Plotting Density of Stocks vs. Normal Distribution
+
+
+```{r}
+# Plotting Verizon Density vs Normal Distribution
+ggplot() +  geom_line(mapping = aes(x = verizon$density$x ,y = verizon$density$y), color = "red") + stat_function(fun = dnorm, n = 1024, args = list(mean = verizon$mean, sd = verizon$sd)) + labs(x = "Log Returns", y =  "Density", title = "Density of Observed Verizon Log Returns vs. Normal Distribution", subtitle = "Verizon")
+
+# Plotting AT&T Density vs Normal Distribution
+ggplot() +  geom_line(mapping = aes(x = at_t$density$x ,y = at_t$density$y), color = "dodgerblue") + stat_function(fun = dnorm, n = 1024, args = list(mean = at_t$mean, sd = at_t$sd)) + labs(x = "Log Returns", y =  "Density", title = "Density of Observed AT&T Log Returns vs. Normal Distribution", subtitle = "AT&T")
+
+```
+
+
+As discerned from the kurtosis statistic for both companies, the normal distribution (black) for the log returns fail to capture the heavy tails in the observed log returns, as well as fails to capture the large probability densities (peaks) observed for log returns near zero.\
+
+### Define Double Exponential Distribution and Compute Statistics
+
+In the below section, the [double exponential](https://www.itl.nist.gov/div898/handbook/eda/section3/eda366c.htm) double exponential distribution is defined. Defined as $\frac{e^{|x|}}{2}$, this distribution might serve as a better approximation for the log return of the stocks than the normal distribution because like the normal distribution, the density is symmetric around a given normal mean ($\mu$), but a major difference is that the double exponential function displays heavy tails that can be scaled about a variance parameter c. To sample the distribution by approximating, a random variable X can be scaled to a value using $\mu + cX$, where $$c = \sqrt{\frac{T\sigma^2}{Var(X)}},~~~~~~~\mu = \hat{\mu}T - ln(MGF(c))$$ where T is the period of time (in years) over which the stock is evaluated, $\hat{\mu}$ is the mean of the distribution being approximated and MGF refers to the [moment generating function](https://en.wikipedia.org/wiki/Moment-generating_function) of the double exponential distribution $\frac{1}{1 + t^2}$.\
+
+```{r}
+double_exponential = list()
+meanfunction = function(x) {x * (exp(-1 * abs(x))/(2))}
+double_exponential[["F"]] = function(x){return(exp(-1 * abs(x))/(2))}
+double_exponential[["F.inv"]] = function(u){return((u<=0.5)*log(2*u) - (u>0.5)*(log(2*(1-u))))}
+double_exponential[["mean"]] = integrate(function(x) {x * (exp(-1 * abs(x))/(2))}, -Inf, Inf)$value
+double_exponential[["variance"]] = integrate(function(x){ ((x - (double_exponential$mean*x))^2) * (exp(-1 * abs(x))/(2))}, -Inf, Inf)$value
+double_exponential[["m"]] = function(c){return(1/(1-(c^2)))}
+double_exponential[["get.c"]] = function(sig){return(((sig^2)/double_exponential$variance)^0.5)}
+double_exponential[["get.mu"]] = function(c, muhat){return(muhat + (c* double_exponential$mean))}
+```
+
+### Compute Double Exponential Parameters
+
+```{r}
+
+# Compute mu and c for stocks
+verizon[["c"]] = double_exponential$get.c(verizon$sd)
+verizon[["mu"]] = double_exponential$get.mu(verizon$c, verizon$mean)
+
+at_t[["c"]] = double_exponential$get.c(at_t$sd)
+at_t[["mu"]] = double_exponential$get.mu(at_t$c, at_t$mean)
+
+# Compute exponential density
+verizon[["exp_density"]] = density(verizon$mean + ((verizon$c) * (double_exponential$F.inv(runif(2012)))))
+at_t[["exp_density"]] = density(at_t$mean + ((at_t$c) * (double_exponential$F.inv(runif(2012)))))
+```
+
+
+### Plotting Densities vs Double Exponential Distribution
+
+```{r}
+# Plotting Verizon Density
+ggplot() +  geom_line(mapping = aes(x = verizon$density$x ,y = verizon$density$y), color = "red") + geom_line(mapping = aes(x = verizon$exp_density$x ,y = verizon$exp_density$y), color = "black") + labs(x = "Log Returns", y =  "Density", title = "Density of Observed Verizon Log Returns vs. Double Exponential Distribution", subtitle = "Verizon")
+
+# Plotting AT&T Density
+ggplot() +  geom_line(mapping = aes(x = verizon$density$x ,y = verizon$density$y), color = "dodgerblue") + geom_line(mapping = aes(x = verizon$exp_density$x ,y = verizon$exp_density$y), color = "black") +labs(x = "Log Returns", y =  "Density", title = "Density of Observed AT&T Log Returns vs. Double Exponential Distribution", subtitle = "AT&T")
+```
+
+
+The double exponential function with the specified parameters $\mu$ and c better approximate the tails of the data, but unlike the normal distribution, the peak of the density of log returns is overestimated with the double exponential function. This could cause errors when estimating the value of a stock over time because a higher density of log returns around 0 means a random variable drawn from this distribution is more likely to be 0, which would make the stocks appear less volatile than they really are as the log returns quantify the day-to-day change in stock prices.\
+
+## Simulating Verizon Stock Prices
+
+From the log return statistics obtained for Verizon, the stock price over a period of time can then be simulated by creating a discrete-time solution of the Black-Scholes Equation. Using the obtained mean, standard deviation of the log returns, the path of the stock over a one year period (T = 1) can be simulated by generating a new normal distribution for each simulation, then taking the average. In this case, the stock price from the start of the obtained data (Feb 1^st^ 2013 - Feb 1^st^ 2013) is plotted over the course of a year.
+
+```{r}
+# Turn verizon stock prices into a dataframe
+V = data.frame(ind = seq(1,length(verizon_data$VZ.Close),1), price = as.double(verizon_data$VZ.Close))
+
+
+num_simulations = 20
+set.seed(123)
+T = 8
+N = 252
+Simulation = matrix(nrow = 2013 , ncol = num_simulations)
+S0  = as.double(verizon_data$VZ.Close[1])
+# Define Normal distribution using statistics that stock price will be simulated from
+z.mean = verizon$mean/(T*N)
+z.sd = verizon$sd
+
+for (i in 1:num_simulations){
+  
+  # Resample normal distribution for the given simulation:
+  Z = rnorm( z.mean, z.sd, n = 2013)
+  #Simulate the stock price 
+  Simulation[,i] = S0 * exp(cumsum(Z))
+
+  
+}
+meltR = melt(Simulation, value.name = "values")
+ggplot() + 
+  geom_line(meltR, mapping = aes(x = Var1, y = values, group = Var2, colour = "Simulated")) + 
+  geom_line(V, mapping = aes(x = ind, y = price, color = "Verizon")) +
+  labs(x = "Trading Days", y = "Price ($USD)", title = "Simulated and Real Stock Price of Verizon Wireless", subtitle = "From 02-01-2013 to 02-01-2021") +
+  scale_color_manual(name = "", breaks = c("Verizon", "Simulated"),values = c("Verizon" = "red", "Simulated" = "azure3" ))
+```
+
+From the chart above, we can see that for the 20 simulations, though the variance of the simulated paths are fairly high, the mean of the simulated stock prices, especially on the last trading day in the dataset is fairly close to the actual stock price. This is an example of the Monte Carlo method, where a value (the stock price in this case) can be accurately estimated by using the average of random samples drawn from a distribution explaining the variable to be estimated.
